@@ -1,10 +1,14 @@
 import './App.css';
 import ChristmasDomotics from "./components/ChristmasDomotic";
 import SmartPlugs from "./components/SmartPlugs";
+import LedController from "./components/LedController";
 
 function App() {
   return (
-    <SmartPlugs />
+      <div>
+        <SmartPlugs />
+        <LedController />
+      </div>
   );
 }
 
