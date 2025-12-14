@@ -8,7 +8,7 @@ const PASS = "esp32Backend!25";
 // Helper per creare header Basic Auth
 const authHeader = "Basic " + btoa(`${USER}:${PASS}`);
 
-const SmartPlugs = ({ children }) => {
+const SmartPlugs = () => {
     const [relays, setRelays] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -57,8 +57,6 @@ const SmartPlugs = ({ children }) => {
     }, []);
 
     if (loading) return <div>Caricamento prese...</div>;
-
-    return children(relays, toggleRelay);
 
     return (
         <div style={{ textAlign: "center" }}>
