@@ -14,6 +14,15 @@ const PASS = "esp32Backend!25";
 
 const authHeader = "Basic " + btoa(`${USER}:${PASS}`);
 
+function debounce(func, wait) {
+    let timeout;
+    return (...args) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
+
+
 // ================= API HELPERS =================
 async function apiGet(path) {
     try {
@@ -62,6 +71,8 @@ async function apiPost(path, body = {}) {
 export default function LedController() {
     const [leds, setLeds] = useState([]);
     const [globalColor, setGlobalColor] = useState("#ffffff");
+    const [globalBrightness, setGlobalBrightness] = useState(100); // 0-100%
+
 
     // Caricamento dati
     const load = async () => {
@@ -76,7 +87,7 @@ export default function LedController() {
     }, []);
 
     // FUNZIONE CHIAVE: Cambia intensità senza cambiare la tonalità
-    const updateIntensity = async (led, brightness) => {
+    const updateIntensity = debounce(async (led, brightness) => {
         // Convertiamo l'attuale RGB in HSV
         let color = tinycolor({ r: led.r, g: led.g, b: led.b });
         // Sovrascriviamo il "Value" (luminosità) con lo slider (0-100)
@@ -86,9 +97,9 @@ export default function LedController() {
         const { r, g, b } = tinycolor(newColor).toRgb();
 
         updateLedApi(led.id, { r, g, b, on: brightness > 0 });
-    };
+    }, 300);
 
-    const updateLedApi = async (id, update) => {
+    const updateLedApi = debounce(async (id, update) => {
         // Update locale rapido
         setLeds(prev => prev.map(l => l.id === id ? { ...l, ...update } : l));
 
@@ -98,28 +109,28 @@ export default function LedController() {
             g: Math.round(update.g),
             b: Math.round(update.b)
         });
-    };
+    }, 300);
 
     // Attiva Rainbow su TUTTE le strisce
-    const startRainbowGlobal = async () => {
+    const startRainbowGlobal = debounce(async () => {
         const promises = leds.map(led =>
             apiPost("/api/strips/rainbow", { id: led.id })
         );
         await Promise.all(promises);
         load(); // Ricarica stato reale dal backend
-    };
+    }, 300);
 
     // Ferma Rainbow su TUTTE le strisce
-    const stopRainbowGlobal = async () => {
+    const stopRainbowGlobal = debounce(async () => {
         const promises = leds.map(led =>
             apiPost("/api/strips/rainbow/stop", { id: led.id })
         );
         await Promise.all(promises);
         load();
-    };
+    }, 300);
 
     // Attiva/Disattiva Rainbow su SINGOLA striscia
-    const toggleSingleRainbow = async (id, isActive) => {
+    const toggleSingleRainbow = debounce(async (id, isActive) => {
         // Aggiornamento ottimistico
         setLeds(leds.map(l => l.id === id ? { ...l, rainbow: !isActive } : l));
 
@@ -130,9 +141,9 @@ export default function LedController() {
         }
         // Piccola pausa per lasciare che l'ESP processi
         setTimeout(load, 200);
-    };
+    }, 300);
 
-    const setAllColor = async (hex) => {
+    const setAllColor = debounce(async (hex) => {
         const { r, g, b } = hexToRgb(hex);
         setGlobalColor(hex);
 
@@ -142,7 +153,7 @@ export default function LedController() {
         );
         await Promise.all(promises);
         load();
-    };
+    }, 300);
 
     // ================= UTIL =================
     const hexToRgb = (hex) => {
@@ -152,6 +163,28 @@ export default function LedController() {
         const b = bigint & 255;
         return { r, g, b };
     };
+
+    const debouncedSetColor = useCallback(
+        debounce((id, rgb) => {
+            apiPut(`/api/strips/set?id=${id}`, { on: true, ...rgb });
+        }, 300),
+        []
+    );
+
+    const debouncedUpdateGlobalBrightness = useCallback(
+        debounce((brightness) => {
+            leds.forEach(led => {
+                let color = tinycolor({ r: led.r, g: led.g, b: led.b });
+                let hsv = color.toHsv();
+                hsv.v = brightness / 100;
+                const { r, g, b } = tinycolor(hsv).toRgb();
+
+                apiPut(`/api/strips/set?id=${led.id}`, { r, g, b, on: brightness > 0 });
+            });
+        }, 200),
+        [leds]
+    );
+
 
     return (
         <Box p={4} sx={{ backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
@@ -174,6 +207,40 @@ export default function LedController() {
                 <Box mt={2}>
                     <HexColorPicker color={globalColor} onChange={setAllColor} />
                 </Box>
+
+                <Box mt={3} px={2}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                        <Brightness6 color="action" />
+                        <Typography variant="body2">INTENSITÀ TUTTI</Typography>
+                    </Stack>
+                    <Slider
+                        value={globalBrightness}
+                        min={0}
+                        max={100}
+                        onChange={(_, v) => {
+                            setGlobalBrightness(v);
+                            debouncedUpdateGlobalBrightness(v);
+                        }}
+                        valueLabelDisplay="auto"
+                        sx={{
+                            color: globalColor,
+                            '& .MuiSlider-thumb': { border: '2px solid currentColor', bgcolor: '#fff' }
+                        }}
+                    />
+                </Box>
+
+                <Typography>Imposta il colore di default del presepe</Typography>
+                <Box
+                    onClick={() => {
+                        const { r, g, b } = tinycolor('#A02B0A').toRgb();
+                        setAllColor('#A02B0A');
+                    }}
+                    sx={{
+                        width: 24, height: 24, borderRadius: '50%', bgcolor: '#A02B0A',
+                        cursor: 'pointer', border: '2px solid #ddd',
+                        '&:hover': { transform: 'scale(1.2)' }, transition: '0.2s'
+                    }}
+                />
             </Box>
 
             <Grid container spacing={4} justifyContent="center">
@@ -186,7 +253,7 @@ export default function LedController() {
                             <Card sx={{ borderRadius: 6, overflow: 'visible', position: 'relative' }}>
                                 <CardContent>
                                     <Stack direction="row" justifyContent="space-between" mb={2}>
-                                        <Typography variant="h6" fontWeight="600">{led.name || `Strip ${led.id}`}</Typography>
+                                        <Typography variant="h6" fontWeight="600">{`Faretto ${led.name.split(" ").pop()}` || `Strip ${led.id}`}</Typography>
                                         <Switch
                                             checked={led.on}
                                             onChange={(e) => updateLedApi(led.id, { on: e.target.checked })}
@@ -209,7 +276,9 @@ export default function LedController() {
                                             color={currentColor.toHexString()}
                                             onChange={(newHex) => {
                                                 const { r, g, b } = tinycolor(newHex).toRgb();
-                                                updateLedApi(led.id, { r, g, b });
+                                                // Aggiornamento locale immediato
+                                                setLeds(prev => prev.map(l => l.id === led.id ? { ...l, r, g, b } : l));
+                                                debouncedSetColor(led.id, { r, g, b });
                                             }}
                                         />
                                     </Box>
@@ -235,7 +304,7 @@ export default function LedController() {
 
                                     {/* Quick Presets / Mix di Colore */}
                                     <Stack direction="row" spacing={1} mt={2} flexWrap="wrap">
-                                        {['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#FFFFFF'].map(preset => (
+                                        {['#FF0000', '#00FF00', '#0000FF', '#A02B0A', '#FFFFFF'].map(preset => (
                                             <Box
                                                 key={preset}
                                                 onClick={() => {
