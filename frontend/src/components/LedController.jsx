@@ -1,19 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+// Aggiungiamo TinyColor per gestire le conversioni facilmente
+import tinycolor from "tinycolor2";
 import {
-    Card,
-    CardContent,
-    Typography,
-    Switch,
-    Slider,
-    Box,
-    Grid,
-    Button,
-    Chip
+    Card, CardContent, Typography, Switch, Slider, Box, Grid, Button, Chip, Stack
 } from "@mui/material";
 import { HexColorPicker } from "react-colorful";
+import { Brightness6, Palette } from "@mui/icons-material";
 
 // ================= CONFIG =================
-const ESP_HOST = "http://newipcamera.duckdns.org:32082";
+const ESP_HOST = "https://newipcamera.duckdns.org";
 const USER = "admin";
 const PASS = "esp32Backend!25";
 
@@ -68,44 +63,42 @@ export default function LedController() {
     const [leds, setLeds] = useState([]);
     const [globalColor, setGlobalColor] = useState("#ffffff");
 
+    // Caricamento dati
     const load = async () => {
         const data = await apiGet("/api/strips");
-        // Il backend restituisce array vuoto o dati validi
-        if (Array.isArray(data)) {
-            setLeds(data);
-        }
+        if (Array.isArray(data)) setLeds(data);
     };
 
     useEffect(() => {
         load();
-        const timer = setInterval(load, 3000); // Sync ogni 3 secondi
+        const timer = setInterval(load, 5000);
         return () => clearInterval(timer);
     }, []);
 
-    // Aggiorna colore/stato singolo LED
-    const updateLed = async (id, update) => {
-        // Aggiornamento ottimistico UI
-        const newLeds = leds.map((l) =>
-            l.id === id ? { ...l, ...update } : l
-        );
-        setLeds(newLeds);
+    // FUNZIONE CHIAVE: Cambia intensità senza cambiare la tonalità
+    const updateIntensity = async (led, brightness) => {
+        // Convertiamo l'attuale RGB in HSV
+        let color = tinycolor({ r: led.r, g: led.g, b: led.b });
+        // Sovrascriviamo il "Value" (luminosità) con lo slider (0-100)
+        let newColor = color.toHsv();
+        newColor.v = brightness / 100;
 
-        // Chiamata API
-        const payload = newLeds.find(l => l.id === id);
+        const { r, g, b } = tinycolor(newColor).toRgb();
 
-        // Se stiamo cambiando colore o ON/OFF, usiamo apiPut
-        // Nota: Il backend disattiva automaticamente il rainbow se riceve un comando colore
-        await apiPut(`/api/strips/set?id=${id}`, {
-            on: payload.on,
-            r: payload.r,
-            g: payload.g,
-            b: payload.b
-        });
-
-        // Se stavi aggiornando 'rainbow' specificamente via switch singolo (gestito a parte sotto)
+        updateLedApi(led.id, { r, g, b, on: brightness > 0 });
     };
 
-    // --- FUNZIONI RAINBOW AGGIORNATE ---
+    const updateLedApi = async (id, update) => {
+        // Update locale rapido
+        setLeds(prev => prev.map(l => l.id === id ? { ...l, ...update } : l));
+
+        await apiPut(`/api/strips/set?id=${id}`, {
+            on: update.on ?? true,
+            r: Math.round(update.r),
+            g: Math.round(update.g),
+            b: Math.round(update.b)
+        });
+    };
 
     // Attiva Rainbow su TUTTE le strisce
     const startRainbowGlobal = async () => {
@@ -161,7 +154,11 @@ export default function LedController() {
     };
 
     return (
-        <Box p={2}>
+        <Box p={4} sx={{ backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
+            <Typography variant="h3" fontWeight="bold" textAlign="center" gutterBottom>
+                Smart Lighting Studio
+            </Typography>
+
             <Box mb={4} display="flex" flexDirection="column" alignItems="center" gap={2}>
                 <Typography variant="h4" gutterBottom>Controller Luci</Typography>
 
@@ -179,81 +176,85 @@ export default function LedController() {
                 </Box>
             </Box>
 
-            <Grid container spacing={3}>
-                {leds.map((led) => (
-                    <Grid item xs={12} md={6} lg={4} key={led.id}>
-                        <Card sx={{
-                            borderRadius: 4,
-                            boxShadow: 3,
-                            border: led.rainbow ? "2px solid #ff00cc" : "none" // Evidenzia se rainbow attivo
-                        }}>
-                            <CardContent>
-                                <Box display="flex" justifyContent="space-between" alignItems="center">
-                                    <Typography variant="h6">{led.name || `Striscia ${led.id + 1}`}</Typography>
-                                    {led.rainbow && <Chip label="Rainbow Active" color="secondary" size="small" />}
-                                </Box>
+            <Grid container spacing={4} justifyContent="center">
+                {leds.map((led) => {
+                    const currentColor = tinycolor({ r: led.r, g: led.g, b: led.b });
+                    const brightnessValue = Math.round(currentColor.toHsv().v * 100);
 
-                                {/* Switch ON/OFF Striscia */}
-                                <Box display="flex" alignItems="center" mt={1} justifyContent="space-between">
-                                    <Typography variant="body2">Power</Typography>
-                                    <Switch
-                                        checked={led.on}
-                                        disabled={led.rainbow} // Disabilita power switch se in rainbow mode (opzionale)
-                                        onChange={(e) => updateLed(led.id, { on: e.target.checked })}
-                                    />
-                                </Box>
+                    return (
+                        <Grid item xs={12} md={6} lg={4} key={led.id}>
+                            <Card sx={{ borderRadius: 6, overflow: 'visible', position: 'relative' }}>
+                                <CardContent>
+                                    <Stack direction="row" justifyContent="space-between" mb={2}>
+                                        <Typography variant="h6" fontWeight="600">{led.name || `Strip ${led.id}`}</Typography>
+                                        <Switch
+                                            checked={led.on}
+                                            onChange={(e) => updateLedApi(led.id, { on: e.target.checked })}
+                                        />
+                                    </Stack>
 
-                                {/* Switch Rainbow Singolo */}
-                                <Box display="flex" alignItems="center" mt={0} justifyContent="space-between">
-                                    <Typography variant="body2" sx={{color: 'secondary.main'}}>Effetto Rainbow</Typography>
-                                    <Switch
-                                        checked={!!led.rainbow} // converte in booleano
-                                        color="secondary"
-                                        onChange={() => toggleSingleRainbow(led.id, led.rainbow)}
-                                    />
-                                </Box>
+                                    {/* Switch Rainbow Singolo */}
+                                    <Box display="flex" alignItems="center" mt={0} justifyContent="space-between">
+                                        <Typography variant="body2" sx={{color: 'secondary.main'}}>Effetto Rainbow</Typography>
+                                        <Switch
+                                            checked={!!led.rainbow} // converte in booleano
+                                            color="secondary"
+                                            onChange={() => toggleSingleRainbow(led.id, led.rainbow)}
+                                        />
+                                    </Box>
 
-                                {/* Slider RGB (Disabilitati se Rainbow è attivo per evitare confusione) */}
-                                <Box opacity={led.rainbow ? 0.4 : 1} pointerEvents={led.rainbow ? 'none' : 'auto'}>
-                                    {["r", "g", "b"].map((c) => (
-                                        <Box key={c} mt={1}>
-                                            <Grid container alignItems="center" spacing={1}>
-                                                <Grid item xs={2}>
-                                                    <Typography variant="caption">{c.toUpperCase()}</Typography>
-                                                </Grid>
-                                                <Grid item xs={10}>
-                                                    <Slider
-                                                        size="small"
-                                                        value={led[c]}
-                                                        min={0}
-                                                        max={255}
-                                                        onChangeCommitted={(_, v) => updateLed(led.id, { [c]: v, on: true })}
-                                                        // onChangeCommitted è meglio di onChange per non floodare l'ESP32 mentre trascini
-                                                        defaultValue={led[c]}
-                                                    />
-                                                </Grid>
-                                            </Grid>
-                                        </Box>
-                                    ))}
-                                </Box>
+                                    {/* Palette Colori Avanzata */}
+                                    <Box sx={{ '& .react-colorful': { width: '100%', height: '150px' } }}>
+                                        <HexColorPicker
+                                            color={currentColor.toHexString()}
+                                            onChange={(newHex) => {
+                                                const { r, g, b } = tinycolor(newHex).toRgb();
+                                                updateLedApi(led.id, { r, g, b });
+                                            }}
+                                        />
+                                    </Box>
 
-                                {/* Anteprima Colore */}
-                                <Box
-                                    mt={2}
-                                    height={30}
-                                    borderRadius={2}
-                                    sx={{
-                                        background: led.rainbow
-                                            ? "linear-gradient(90deg, red, yellow, green, blue, purple)"
-                                            : `rgb(${led.r},${led.g},${led.b})`,
-                                        opacity: (led.on || led.rainbow) ? 1 : 0.2,
-                                        border: "1px solid #ccc"
-                                    }}
-                                />
-                            </CardContent>
-                        </Card>
-                    </Grid>
-                ))}
+                                    {/* Slider Intensità (Brightness) */}
+                                    <Box mt={3} px={1}>
+                                        <Stack direction="row" spacing={2} alignItems="center">
+                                            <Brightness6 color="action" />
+                                            <Typography variant="caption">INTENSITÀ</Typography>
+                                        </Stack>
+                                        <Slider
+                                            value={brightnessValue}
+                                            min={0}
+                                            max={100}
+                                            onChange={(_, v) => updateIntensity(led, v)}
+                                            valueLabelDisplay="auto"
+                                            sx={{
+                                                color: currentColor.toHexString(),
+                                                '& .MuiSlider-thumb': { border: '2px solid currentColor', bgcolor: '#fff' }
+                                            }}
+                                        />
+                                    </Box>
+
+                                    {/* Quick Presets / Mix di Colore */}
+                                    <Stack direction="row" spacing={1} mt={2} flexWrap="wrap">
+                                        {['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#FFFFFF'].map(preset => (
+                                            <Box
+                                                key={preset}
+                                                onClick={() => {
+                                                    const { r, g, b } = tinycolor(preset).toRgb();
+                                                    updateLedApi(led.id, { r, g, b });
+                                                }}
+                                                sx={{
+                                                    width: 24, height: 24, borderRadius: '50%', bgcolor: preset,
+                                                    cursor: 'pointer', border: '2px solid #ddd',
+                                                    '&:hover': { transform: 'scale(1.2)' }, transition: '0.2s'
+                                                }}
+                                            />
+                                        ))}
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+                    );
+                })}
             </Grid>
         </Box>
     );

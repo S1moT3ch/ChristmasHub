@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 // Configura l'IP del tuo ESP32 e le credenziali Basic Auth
-const ESP32_IP = "newipcamera.duckdns.org:32082";
+const ESP32_IP = "newipcamera.duckdns.org";
 const USER = "admin";
 const PASS = "esp32Backend!25";
 
@@ -15,7 +15,7 @@ const SmartPlugs = ({ children }) => {
     // Funzione per caricare lo stato dei relè
     const fetchRelays = async () => {
         try {
-            const res = await fetch(`http://${ESP32_IP}/api/prese`, {
+            const res = await fetch(`https://${ESP32_IP}/api/prese`, {
                 headers: {
                     "Authorization": authHeader,
                 },
@@ -32,7 +32,7 @@ const SmartPlugs = ({ children }) => {
     // Funzione per cambiare stato di un relè
     const toggleRelay = async (id, newState) => {
         try {
-            await fetch(`http://${ESP32_IP}/api/prese/set?id=${id}`, {
+            await fetch(`https://${ESP32_IP}/api/prese/set?id=${id}`, {
                 method: "PUT",
                 headers: {
                     "Authorization": authHeader,
